@@ -1,3 +1,4 @@
+import html
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import io
 import os
@@ -20,32 +21,26 @@ bot = telebot.TeleBot(TOKEN)
 class HealthCheckHandler(BaseHTTPRequestHandler):
 
   def do_GET(self):
-    """Ответ на GET-запросы для прохождения Health Check."""
     self.send_response(200)
     self.send_header("Content-type", "application/json; charset=utf-8")
     self.end_headers()
     self.wfile.write(b'{"status": "ok", "bot": "running"}')
 
   def log_message(self, format, *args):
-    """Отключаем лишние логи HTTP-запросов в консоли."""
     return
 
 
 def start_http_server():
-  # Берем порт из переменной окружения PORT (для Render/Railway) или 8080 по умолчанию
   port = int(os.environ.get("PORT", 8080))
   server_address = ("0.0.0.0", port)
   httpd = HTTPServer(server_address, HealthCheckHandler)
-  print(f"🌐 Микро HTTP-сервер запущен на порту {port}")
   httpd.serve_forever()
 
 
-# Запускаем HTTP-сервер в отдельном фоновом (daemon) потоке
 threading.Thread(target=start_http_server, daemon=True).start()
 
-
 # =============================================================
-# 2. ОСНОВНАЯ ЛОГИКА ТЕЛЕГРАМ-БОТА
+# 2. ОСНОВНАЯ ЛОГИКА БОТА С HTML-РАЗМЕТКОЙ
 # =============================================================
 
 user_settings = {}
@@ -73,13 +68,13 @@ COLOR_PRESETS = {
 @bot.message_handler(commands=["start", "help"])
 def send_welcome(message):
   text = (
-      "👋 *Универсальный QR-бот*\n\n"
-      "🔹 **Возможности:**\n"
-      "1. **Генерация**: отправь любой текст или ссылку.\n"
-      "2. **Сканирование**: отправь фото с QR-кодом для его расшифровки.\n"
-      "3. **Логотип**: отправь обычное фото (без QR), чтобы сделать его"
+      "👋 <b>Универсальный QR-бот</b>\n\n"
+      "🔹 <b>Возможности:</b>\n"
+      "1. <b>Генерация</b>: отправь любой текст или ссылку.\n"
+      "2. <b>Сканирование</b>: отправь фото с QR-кодом для его расшифровки.\n"
+      "3. <b>Логотип</b>: отправь обычное фото (без QR), чтобы сделать его"
       " логотипом.\n"
-      "4. **Цвет**: выбирай цвета QR-кода с помощью кнопок.\n\n"
+      "4. <b>Цвет</b>: выбирай цвета QR-кода с помощью кнопок.\n\n"
       "🗑 /clear_logo — сбросить текущий логотип"
   )
 
@@ -91,7 +86,7 @@ def send_welcome(message):
   markup.add(*buttons)
 
   bot.send_message(
-      message.chat.id, text, parse_mode="Markdown", reply_markup=markup
+      message.chat.id, text, parse_mode="HTML", reply_markup=markup
   )
 
 
@@ -106,8 +101,8 @@ def handle_color_change(call):
     bot.answer_callback_query(call.id, f"Выбран цвет: {color_name}")
     bot.send_message(
         call.message.chat.id,
-        f"✅ Цвет QR-кода изменён на **{color_name}**.",
-        parse_mode="Markdown",
+        f"✅ Цвет QR-кода изменён на <b>{html.escape(color_name)}</b>.",
+        parse_mode="HTML",
     )
 
 
@@ -124,7 +119,6 @@ def handle_photo(message):
     file_info = bot.get_file(message.photo[-1].file_id)
     downloaded_file = bot.download_file(file_info.file_path)
 
-    # Декодирование QR-кода через OpenCV
     np_arr = np.frombuffer(downloaded_file, np.uint8)
     img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
@@ -132,7 +126,8 @@ def handle_photo(message):
     data, bbox, _ = detector.detectAndDecode(img)
 
     if data:
-      reply_text = f"🔎 **Расшифрованный QR-код:**\n\n`{data}`"
+      safe_data = html.escape(data)
+      reply_text = f"🔎 <b>Расшифрованный QR-код:</b>\n\n<code>{safe_data}</code>"
       markup = types.InlineKeyboardMarkup()
 
       if data.startswith(("http://", "https://")):
@@ -141,16 +136,16 @@ def handle_photo(message):
         )
 
       bot.reply_to(
-          message, reply_text, parse_mode="Markdown", reply_markup=markup
+          message, reply_text, parse_mode="HTML", reply_markup=markup
       )
     else:
       config = get_user_config(message.chat.id)
       config["logo"] = downloaded_file
       bot.reply_to(
           message,
-          "🖼 QR-код на фото не обнаружен.\nКартинка сохранена как **логотип**"
-          " для новых QR-кодов!",
-          parse_mode="Markdown",
+          "🖼 QR-код на фото не обнаружен.\nКартинка сохранена как"
+          " <b>логотип</b> для новых QR-кодов!",
+          parse_mode="HTML",
       )
 
   except Exception:
@@ -158,55 +153,4 @@ def handle_photo(message):
 
 
 @bot.message_handler(func=lambda message: True)
-def generate_qr(message):
-  try:
-    config = get_user_config(message.chat.id)
-
-    qr = qrcode.QRCode(
-        version=None,
-        error_correction=qrcode.constants.ERROR_CORRECT_H,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(message.text)
-    qr.make(fit=True)
-
-    qr_img = qr.make_image(
-        fill_color=config["fill_color"], back_color=config["back_color"]
-    ).convert("RGBA")
-
-    if config["logo"]:
-      logo = Image.open(io.BytesIO(config["logo"])).convert("RGBA")
-      qr_w, qr_h = qr_img.size
-      max_logo_size = int(qr_w * 0.20)
-      logo.thumbnail((max_logo_size, max_logo_size), Image.Resampling.LANCZOS)
-
-      pos_x = (qr_w - logo.width) // 2
-      pos_y = (qr_h - logo.height) // 2
-
-      pad = 6
-      bg_rect = Image.new(
-          "RGBA", (logo.width + pad * 2, logo.height + pad * 2), "white"
-      )
-      qr_img.paste(bg_rect, (pos_x - pad, pos_y - pad))
-      qr_img.paste(logo, (pos_x, pos_y), logo)
-
-    bio = io.BytesIO()
-    bio.name = "qrcode.png"
-    qr_img.save(bio, "PNG")
-    bio.seek(0)
-
-    bot.send_photo(
-        message.chat.id,
-        photo=bio,
-        caption=f"Ваш QR-код для: `{message.text}`",
-        parse_mode="Markdown",
-    )
-
-  except Exception:
-    bot.reply_to(message, "Произошла ошибка при генерации QR-кода.")
-
-
-if __name__ == "__main__":
-  print("🤖 Бот запущен...")
-  bot.infinity_polling()
+def generate_qr
