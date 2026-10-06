@@ -1,4 +1,6 @@
 pyTelegramBotAPI
 opencv-python-headless
+Pillow
 requests
+
 
