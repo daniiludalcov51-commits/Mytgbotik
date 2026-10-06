@@ -1,8 +1,10 @@
+
 pyTelegramBotAPI
 opencv-python-headless
 Pillow
-requests
 qrcode
+requests
+numpy
 
 
 
