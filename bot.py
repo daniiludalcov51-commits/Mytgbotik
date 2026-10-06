@@ -153,4 +153,6 @@ def handle_photo(message):
 
 
 @bot.message_handler(func=lambda message: True)
-def generate_qr(message):  
+def generate_qr(message):
+    pass
+
